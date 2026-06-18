@@ -8,6 +8,9 @@ on:
         required: true
         default: "sales_2026_06_10.csv"
 
+  schedule:
+    - cron: "15 13 * * *"
+
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
