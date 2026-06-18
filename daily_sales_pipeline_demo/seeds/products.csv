@@ -1,0 +1,11 @@
+product_id,product_name,category,unit_cost,active
+P1001,Whole Milk 2L,Dairy,3.10,true
+P1002,Greek Yogurt 750g,Dairy,4.25,true
+P2001,Bananas 1kg,Produce,1.20,true
+P2002,Strawberries 454g,Produce,3.50,true
+P3001,Chicken Breast 1kg,Meat,9.75,true
+P3002,Salmon Fillet 500g,Seafood,12.50,true
+P4001,Basmati Rice 5kg,Grocery,10.00,true
+P4002,Pasta Sauce 650mL,Grocery,2.25,true
+P5001,Vitamin C 100ct,Pharmacy,8.00,true
+P5002,Pain Relief 50ct,Pharmacy,6.50,true

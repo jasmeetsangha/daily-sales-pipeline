@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+.venv/
+dbt_sales_pipeline/target/
+dbt_sales_pipeline/dbt_packages/
+logs/
+github-actions-key.json

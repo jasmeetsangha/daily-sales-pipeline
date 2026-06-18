@@ -1,0 +1,11 @@
+file_name,row_number,issue,expected_handling
+sales_2026_06_11.csv,6,duplicate order_id,dbt unique test should fail or rejected row logic should catch it
+sales_2026_06_11.csv,14,blank customer_id,not_null customer_id test should fail or reject row
+sales_2026_06_11.csv,23,negative quantity,accepted_range quantity > 0 test should fail
+sales_2026_06_11.csv,32,future order_date,custom test should flag order_date > current_date
+sales_2026_06_11.csv,41,blank product_id,not_null product_id test should fail
+sales_2026_06_11.csv,50,product_id P9999 missing from product seed,relationships test to products should fail
+sales_2026_06_11.csv,59,discount greater than gross amount,custom test should flag net_amount < 0
+sales_2026_06_11.csv,68,payment method has casing/trailing-space issue,staging model should standardize it
+sales_2026_06_11.csv,77,blank store_id,not_null store_id test should fail
+sales_2026_06_11.csv,86,invalid date format MM/DD/YYYY,safe cast should produce null and not_null order_date test should fail
