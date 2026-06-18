@@ -50,5 +50,24 @@ jobs:
       - name: Load GCS file to BigQuery
         run: uv run python scripts/load_gcs_to_bigquery.py
 
+      - name: Create dbt profile
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml <<EOF
+          dbt_sales_pipeline:
+            target: dev
+            outputs:
+              dev:
+                type: bigquery
+                method: oauth
+                project: $PROJECT_ID
+                dataset: $ANALYTICS_DATASET
+                location: $REGION
+                threads: 4
+          EOF
+
+      - name: Check dbt connection
+        run: uv run dbt debug --project-dir dbt_sales_pipeline
+
       - name: Run dbt build
         run: uv run dbt build --project-dir dbt_sales_pipeline
