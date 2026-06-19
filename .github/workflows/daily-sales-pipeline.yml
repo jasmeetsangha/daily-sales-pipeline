@@ -21,7 +21,7 @@ jobs:
       RAW_DATASET: sales_raw
       ANALYTICS_DATASET: sales_analytics
       BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
-      FILE_NAME: ${{ github.event.inputs.file_name }}
+      FILE_NAME: ${{ github.event.inputs.file_name || 'sales_2026_06_10.csv' }}
 
     steps:
       - name: Checkout repo
@@ -46,9 +46,22 @@ jobs:
 
       - name: Upload selected CSV to GCS
         run: |
+          echo "FILE_NAME=$FILE_NAME"
+          ls -l daily_sales_pipeline_demo/incoming/
+
+          if [ -z "$FILE_NAME" ]; then
+            echo "FILE_NAME is empty"
+            exit 1
+          fi
+
+          if [ ! -f "daily_sales_pipeline_demo/incoming/$FILE_NAME" ]; then
+            echo "File not found: daily_sales_pipeline_demo/incoming/$FILE_NAME"
+            exit 1
+          fi
+        
           gcloud storage cp \
-            daily_sales_pipeline_demo/incoming/$FILE_NAME \
-            gs://$BUCKET_NAME/incoming/$FILE_NAME
+            "daily_sales_pipeline_demo/incoming/$FILE_NAME" \
+            "gs://$BUCKET_NAME/incoming/$FILE_NAME"
 
       - name: Load GCS file to BigQuery
         run: uv run python scripts/load_gcs_to_bigquery.py
