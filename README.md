@@ -108,3 +108,57 @@ This project teaches:
 - Data quality validation
 - Rejected records handling
 - GitHub Actions automation
+
+## Version 2: GCS Landing Zone Pattern
+
+The pipeline now treats GCS as the landing zone.
+
+Files should arrive in:
+
+gs://daily-sales-learning-sales-demo-bucket-965488630989/incoming/
+
+The GitHub Actions workflow checks for a file in incoming, loads it into BigQuery, runs dbt, and then moves the file based on the result.
+
+Success:
+
+incoming/file.csv → processed/file.csv
+
+Failure:
+
+incoming/file.csv → rejected/file.csv
+
+### Simulate source file arrival
+
+Upload good file:
+
+make upload-good
+
+Upload bad file:
+
+make upload-bad
+
+### Run from GitHub Actions
+
+Go to:
+
+Actions → Daily Sales Pipeline → Run workflow
+
+Use:
+
+sales_2026_06_10.csv
+
+for a success test.
+
+Use:
+
+sales_2026_06_11.csv
+
+for a failure/rejected-records test.
+
+### Scheduled behavior
+
+When the workflow runs on schedule, it looks for the first CSV file in incoming/.
+
+If a file exists, it processes it.
+
+If no file exists, the workflow fails clearly.
