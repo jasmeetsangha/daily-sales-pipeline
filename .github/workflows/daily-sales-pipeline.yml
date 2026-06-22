@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       file_name:
-        description: "CSV file to process"
-        required: true
+        description: "CSV file to process. Leave default for good test file."
+        required: false
         default: "sales_2026_06_10.csv"
 
   schedule:
@@ -21,7 +21,7 @@ jobs:
       RAW_DATASET: sales_raw
       ANALYTICS_DATASET: sales_analytics
       BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
-      FILE_NAME: ${{ github.event.inputs.file_name || 'sales_2026_06_10.csv' }}
+      FILE_NAME: ${{ github.event.inputs.file_name || '' }}
 
     steps:
       - name: Checkout repo
@@ -44,24 +44,35 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Upload selected CSV to GCS
+      - name: Resolve source file name
         run: |
-          echo "FILE_NAME=$FILE_NAME"
-          ls -l daily_sales_pipeline_demo/incoming/
+          echo "Initial FILE_NAME=$FILE_NAME"
 
           if [ -z "$FILE_NAME" ]; then
-            echo "FILE_NAME is empty"
+            echo "No manual file_name input was provided."
+            echo "Looking for the first CSV file in gs://$BUCKET_NAME/incoming/"
+
+            FILE_NAME=$(gcloud storage ls "gs://$BUCKET_NAME/incoming/*.csv" 2>/dev/null | sort | head -n 1 | xargs -n 1 basename || true)
+          fi
+
+          if [ -z "$FILE_NAME" ]; then
+            echo "No CSV files found in gs://$BUCKET_NAME/incoming/"
+            echo "Upload a file first, for example: make upload-good"
             exit 1
           fi
 
-          if [ ! -f "daily_sales_pipeline_demo/incoming/$FILE_NAME" ]; then
-            echo "File not found: daily_sales_pipeline_demo/incoming/$FILE_NAME"
+          echo "Resolved FILE_NAME=$FILE_NAME"
+          echo "FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
+
+      - name: Check source file exists in GCS
+        run: |
+          echo "Checking file: gs://$BUCKET_NAME/incoming/$FILE_NAME"
+
+          if ! gcloud storage ls "gs://$BUCKET_NAME/incoming/$FILE_NAME"; then
+            echo "Source file not found."
+            echo "Expected: gs://$BUCKET_NAME/incoming/$FILE_NAME"
             exit 1
           fi
-        
-          gcloud storage cp \
-            "daily_sales_pipeline_demo/incoming/$FILE_NAME" \
-            "gs://$BUCKET_NAME/incoming/$FILE_NAME"
 
       - name: Load GCS file to BigQuery
         run: uv run python scripts/load_gcs_to_bigquery.py
@@ -87,3 +98,30 @@ jobs:
 
       - name: Run dbt build
         run: uv run dbt build --project-dir dbt_sales_pipeline
+
+      - name: Move file to processed
+        if: success()
+        run: |
+          echo "Moving file to processed folder."
+
+          gcloud storage mv \
+            "gs://$BUCKET_NAME/incoming/$FILE_NAME" \
+            "gs://$BUCKET_NAME/processed/$FILE_NAME"
+
+      - name: Move file to rejected
+        if: failure()
+        run: |
+          echo "Pipeline failed. Attempting to move file to rejected folder."
+
+          if [ -z "$FILE_NAME" ]; then
+            echo "FILE_NAME is empty. Nothing to move."
+            exit 0
+          fi
+
+          if gcloud storage ls "gs://$BUCKET_NAME/incoming/$FILE_NAME"; then
+            gcloud storage mv \
+              "gs://$BUCKET_NAME/incoming/$FILE_NAME" \
+              "gs://$BUCKET_NAME/rejected/$FILE_NAME"
+          else
+            echo "File is not in incoming folder. Nothing to move."
+          fi

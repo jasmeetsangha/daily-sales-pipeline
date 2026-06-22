@@ -1,7 +1,7 @@
 include .env
 export
 
-.PHONY: upload-good upload-bad load dbt-build run-good run-bad full-good full-bad check-output check-rejected
+.PHONY: upload-good upload-bad load dbt-build run-good run-bad full-good full-bad check-output check-rejected check-audit
 
 upload-good:
 	gcloud storage cp daily_sales_pipeline_demo/incoming/sales_2026_06_10.csv gs://$(BUCKET_NAME)/incoming/sales_2026_06_10.csv
@@ -40,3 +40,7 @@ check-output:
 check-rejected:
 	bq query --use_legacy_sql=false \
 	"SELECT order_id, order_date, store_id, customer_id, product_id, quantity, unit_price, discount_amount, net_amount, rejection_reason FROM \`$(PROJECT_ID).$(ANALYTICS_DATASET).rejected_sales_records\` ORDER BY rejection_reason, order_id"
+
+check-audit:
+	bq query --use_legacy_sql=false \
+	"SELECT run_id, file_name, started_at, completed_at, row_count, status, error_message FROM \`$(PROJECT_ID).$(RAW_DATASET).pipeline_run_audit\` ORDER BY started_at DESC LIMIT 10"
