@@ -45,6 +45,7 @@ jobs:
         run: uv sync
 
       - name: Resolve source file name
+        id: resolve_file
         run: |
           echo "Initial FILE_NAME=$FILE_NAME"
 
@@ -52,19 +53,48 @@ jobs:
             echo "No manual file_name input was provided."
             echo "Looking for the first CSV file in gs://$BUCKET_NAME/incoming/"
 
-            FILE_NAME=$(gcloud storage ls "gs://$BUCKET_NAME/incoming/*.csv" 2>/dev/null | sort | head -n 1 | xargs -n 1 basename || true)
-          fi
+            FILE_URI=$(gcloud storage ls "gs://$BUCKET_NAME/incoming/*.csv" 2>/dev/null | sort | head -n 1 || true)
 
-          if [ -z "$FILE_NAME" ]; then
-            echo "No CSV files found in gs://$BUCKET_NAME/incoming/"
-            echo "Upload a file first, for example: make upload-good"
-            exit 1
+            if [ -z "$FILE_URI" ]; then
+              echo "No CSV files found in gs://$BUCKET_NAME/incoming/"
+              echo "This is a no-op scheduled run."
+
+              echo "no_file_found=true" >> "$GITHUB_OUTPUT"
+              echo "FILE_NAME=" >> "$GITHUB_ENV"
+              exit 0
+            fi
+
+            FILE_NAME=$(basename "$FILE_URI")
           fi
 
           echo "Resolved FILE_NAME=$FILE_NAME"
-          echo "FILE_NAME=$FILE_NAME" >> $GITHUB_ENV
+
+          echo "no_file_found=false" >> "$GITHUB_OUTPUT"
+          echo "file_name=$FILE_NAME" >> "$GITHUB_OUTPUT"
+          echo "FILE_NAME=$FILE_NAME" >> "$GITHUB_ENV"
+
+      - name: Record no file found audit row
+        if: ${{ steps.resolve_file.outputs.no_file_found == 'true' }}
+        run: |
+          RUN_ID="github_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+
+          bq query --use_legacy_sql=false "
+          INSERT INTO \`${PROJECT_ID}.${RAW_DATASET}.pipeline_run_audit\`
+            (run_id, file_name, started_at, completed_at, row_count, status, error_message)
+          VALUES
+            (
+              '${RUN_ID}',
+              'NO_FILE_FOUND',
+              CURRENT_TIMESTAMP(),
+              CURRENT_TIMESTAMP(),
+              0,
+              'NO_FILE_FOUND',
+              'No CSV files found in incoming folder'
+            )
+          "
 
       - name: Check source file exists in GCS
+        if: ${{ steps.resolve_file.outputs.no_file_found != 'true' }}
         run: |
           echo "Checking file: gs://$BUCKET_NAME/incoming/$FILE_NAME"
 
@@ -75,9 +105,11 @@ jobs:
           fi
 
       - name: Load GCS file to BigQuery
+        if: ${{ steps.resolve_file.outputs.no_file_found != 'true' }}
         run: uv run python scripts/load_gcs_to_bigquery.py
 
       - name: Create dbt profile
+        if: ${{ steps.resolve_file.outputs.no_file_found != 'true' }}
         run: |
           mkdir -p ~/.dbt
           cat > ~/.dbt/profiles.yml <<EOF
@@ -94,13 +126,15 @@ jobs:
           EOF
 
       - name: Check dbt connection
+        if: ${{ steps.resolve_file.outputs.no_file_found != 'true' }}
         run: uv run dbt debug --project-dir dbt_sales_pipeline
 
       - name: Run dbt build
+        if: ${{ steps.resolve_file.outputs.no_file_found != 'true' }}
         run: uv run dbt build --project-dir dbt_sales_pipeline
 
       - name: Move file to processed
-        if: success()
+        if: ${{ success() && steps.resolve_file.outputs.no_file_found != 'true' }}
         run: |
           echo "Moving file to processed folder."
 
@@ -109,7 +143,7 @@ jobs:
             "gs://$BUCKET_NAME/processed/$FILE_NAME"
 
       - name: Move file to rejected
-        if: failure()
+        if: ${{ failure() && steps.resolve_file.outputs.no_file_found != 'true' }}
         run: |
           echo "Pipeline failed. Attempting to move file to rejected folder."
 
@@ -125,3 +159,9 @@ jobs:
           else
             echo "File is not in incoming folder. Nothing to move."
           fi
+
+      - name: No-op summary
+        if: ${{ steps.resolve_file.outputs.no_file_found == 'true' }}
+        run: |
+          echo "Pipeline completed with no-op status."
+          echo "No CSV files were available in incoming folder."
