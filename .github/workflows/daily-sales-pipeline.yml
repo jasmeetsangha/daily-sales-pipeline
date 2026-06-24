@@ -73,6 +73,69 @@ jobs:
           echo "file_name=$FILE_NAME" >> "$GITHUB_OUTPUT"
           echo "FILE_NAME=$FILE_NAME" >> "$GITHUB_ENV"
 
+      - name: Record pipeline started event
+        if: ${{ steps.resolve_file.outputs.no_file_found != 'true' }}
+        run: |
+          EVENT_ID="github_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_started"
+
+          bq query --use_legacy_sql=false "
+          INSERT INTO \`${PROJECT_ID}.${RAW_DATASET}.pipeline_run_events\`
+            (
+              event_id,
+              github_run_id,
+              github_run_attempt,
+              file_name,
+              event_type,
+              event_time,
+              source_uri,
+              destination_uri,
+              message
+            )
+          VALUES
+            (
+              '${EVENT_ID}',
+              '${GITHUB_RUN_ID}',
+              '${GITHUB_RUN_ATTEMPT}',
+              '${FILE_NAME}',
+              'PIPELINE_STARTED',
+              CURRENT_TIMESTAMP(),
+              'gs://${BUCKET_NAME}/incoming/${FILE_NAME}',
+              NULL,
+              'Pipeline started for file'
+            )
+          "
+      - name: Record no file found event
+        if: ${{ steps.resolve_file.outputs.no_file_found == 'true' }}
+        run: |
+          EVENT_ID="github_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_no_file"
+
+          bq query --use_legacy_sql=false "
+          INSERT INTO \`${PROJECT_ID}.${RAW_DATASET}.pipeline_run_events\`
+            (
+              event_id,
+              github_run_id,
+              github_run_attempt,
+              file_name,
+              event_type,
+              event_time,
+              source_uri,
+              destination_uri,
+              message
+            )
+          VALUES
+            (
+              '${EVENT_ID}',
+              '${GITHUB_RUN_ID}',
+              '${GITHUB_RUN_ATTEMPT}',
+              'NO_FILE_FOUND',
+              'NO_FILE_FOUND',
+              CURRENT_TIMESTAMP(),
+              'gs://${BUCKET_NAME}/incoming/',
+              NULL,
+              'No CSV files found in incoming folder'
+            )
+          "
+
       - name: Record no file found audit row
         if: ${{ steps.resolve_file.outputs.no_file_found == 'true' }}
         run: |
@@ -142,6 +205,38 @@ jobs:
             "gs://$BUCKET_NAME/incoming/$FILE_NAME" \
             "gs://$BUCKET_NAME/processed/$FILE_NAME"
 
+      - name: Record pipeline success event
+        if: ${{ success() && steps.resolve_file.outputs.no_file_found != 'true' }}
+        run: |
+          EVENT_ID="github_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_success"
+
+          bq query --use_legacy_sql=false "
+          INSERT INTO \`${PROJECT_ID}.${RAW_DATASET}.pipeline_run_events\`
+            (
+              event_id,
+              github_run_id,
+              github_run_attempt,
+              file_name,
+              event_type,
+              event_time,
+              source_uri,
+              destination_uri,
+              message
+            )
+          VALUES
+            (
+              '${EVENT_ID}',
+              '${GITHUB_RUN_ID}',
+              '${GITHUB_RUN_ATTEMPT}',
+              '${FILE_NAME}',
+              'PIPELINE_SUCCESS',
+              CURRENT_TIMESTAMP(),
+              'gs://${BUCKET_NAME}/incoming/${FILE_NAME}',
+              'gs://${BUCKET_NAME}/processed/${FILE_NAME}',
+              'Pipeline completed successfully and file moved to processed'
+            )
+          "
+
       - name: Move file to rejected
         if: ${{ failure() && steps.resolve_file.outputs.no_file_found != 'true' }}
         run: |
@@ -159,6 +254,38 @@ jobs:
           else
             echo "File is not in incoming folder. Nothing to move."
           fi
+
+      - name: Record pipeline failed event
+        if: ${{ failure() && steps.resolve_file.outputs.no_file_found != 'true' }}
+        run: |
+          EVENT_ID="github_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_failed"
+
+          bq query --use_legacy_sql=false "
+          INSERT INTO \`${PROJECT_ID}.${RAW_DATASET}.pipeline_run_events\`
+            (
+              event_id,
+              github_run_id,
+              github_run_attempt,
+              file_name,
+              event_type,
+              event_time,
+              source_uri,
+              destination_uri,
+              message
+            )
+          VALUES
+            (
+              '${EVENT_ID}',
+              '${GITHUB_RUN_ID}',
+              '${GITHUB_RUN_ATTEMPT}',
+              '${FILE_NAME}',
+              'PIPELINE_FAILED',
+              CURRENT_TIMESTAMP(),
+              'gs://${BUCKET_NAME}/incoming/${FILE_NAME}',
+              'gs://${BUCKET_NAME}/rejected/${FILE_NAME}',
+              'Pipeline failed and file was moved to rejected if it still existed in incoming'
+            )
+          "
 
       - name: No-op summary
         if: ${{ steps.resolve_file.outputs.no_file_found == 'true' }}
