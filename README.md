@@ -1,164 +1,141 @@
-# Daily Sales Pipeline
+## GitHub Environments
 
-This project is a beginner data engineering pipeline using:
+This project uses GitHub Environments to separate deployment configuration between development and production.
 
-- Google Cloud Storage
-- BigQuery
-- Python
-- dbt
-- GitHub Actions
-- uv
+The required environments are:
 
-## Pipeline Flow
+* `development`
+* `production`
 
-CSV file
-→ GCS bucket
-→ BigQuery raw table
-→ dbt staging model
-→ valid records table
-→ rejected records table
-→ final daily sales fact table
+Environment-specific configuration should be stored inside each GitHub Environment instead of being hardcoded directly in the workflow or stored only as repository-level secrets.
 
-## GCP Resources
+### Why GitHub Environments are used
 
-Project:
+GitHub Environments provide:
 
-daily-sales-learning
+* Separate variables for development and production
+* Separate secrets for development and production
+* Safer production deployment controls
+* Optional approval rules before production runs
+* Cleaner workflow configuration
+* Reduced risk of accidentally using production credentials during development
 
-Bucket:
+### Development Environment
 
-daily-sales-learning-sales-demo-bucket-965488630989
+The `development` environment is used for testing workflow changes, dbt changes, and sample data pipeline runs.
 
-BigQuery datasets:
+Recommended development variables:
 
-- sales_raw
-- sales_analytics
+| Variable            | Description                            |
+| ------------------- | -------------------------------------- |
+| `GCP_PROJECT_ID`    | GCP project used for development       |
+| `GCP_BUCKET_NAME`   | GCS bucket used by the pipeline        |
+| `REGION`            | BigQuery region                        |
+| `RAW_DATASET`       | Development raw BigQuery dataset       |
+| `ANALYTICS_DATASET` | Development analytics BigQuery dataset |
+| `INCOMING_PREFIX`   | Development incoming GCS folder        |
+| `PROCESSED_PREFIX`  | Development processed GCS folder       |
+| `REJECTED_PREFIX`   | Development rejected GCS folder        |
 
-## Main Tables / Views
+Recommended development secret:
 
-Raw table:
+| Secret       | Description                                                          |
+| ------------ | -------------------------------------------------------------------- |
+| `GCP_SA_KEY` | Service account JSON key used by GitHub Actions for development runs |
 
-- sales_raw.sales_daily
+### Production Environment
 
-dbt models:
+The `production` environment is used for production pipeline runs.
 
-- sales_analytics.stg_sales
-- sales_analytics.valid_sales_records
-- sales_analytics.rejected_sales_records
-- sales_analytics.fct_daily_sales
+Recommended production variables:
 
-## Local Commands
+| Variable            | Description                           |
+| ------------------- | ------------------------------------- |
+| `GCP_PROJECT_ID`    | GCP project used for production       |
+| `GCP_BUCKET_NAME`   | GCS bucket used by the pipeline       |
+| `REGION`            | BigQuery region                       |
+| `RAW_DATASET`       | Production raw BigQuery dataset       |
+| `ANALYTICS_DATASET` | Production analytics BigQuery dataset |
+| `INCOMING_PREFIX`   | Production incoming GCS folder        |
+| `PROCESSED_PREFIX`  | Production processed GCS folder       |
+| `REJECTED_PREFIX`   | Production rejected GCS folder        |
 
-Run good file:
+Recommended production secret:
 
-make full-good
+| Secret       | Description                                                         |
+| ------------ | ------------------------------------------------------------------- |
+| `GCP_SA_KEY` | Service account JSON key used by GitHub Actions for production runs |
 
-Run bad file:
+### Shared configuration
 
-make full-bad
+Values that are identical across all environments may remain as repository-level variables or secrets.
 
-Check final sales output:
+Examples:
 
-make check-output
+| Name             | Type                | Reason                                                             |
+| ---------------- | ------------------- | ------------------------------------------------------------------ |
+| `REGION`         | Repository variable | Can remain shared if all environments use the same BigQuery region |
+| `PYTHON_VERSION` | Repository variable | Can remain shared if all environments use the same Python version  |
 
-Check rejected records:
+### Workflow behavior
 
-make check-rejected
+The GitHub Actions workflow should allow the target environment to be selected when the workflow is manually triggered.
 
-## GitHub Actions
+Example:
 
-The workflow is:
+```yaml
+workflow_dispatch:
+  inputs:
+    target_environment:
+      description: "Environment to run against"
+      required: true
+      default: "development"
+      type: choice
+      options:
+        - development
+        - production
+```
 
-.github/workflows/daily-sales-pipeline.yml
+The job should reference the selected environment:
 
-It can be run manually from:
+```yaml
+environment: ${{ inputs.target_environment }}
+```
 
-Actions → Daily Sales Pipeline → Run workflow
+After the environment is selected, the workflow can use environment-specific variables and secrets:
 
-Use this file for success test:
+```yaml
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  BUCKET_NAME: ${{ vars.GCP_BUCKET_NAME }}
+  REGION: ${{ vars.REGION }}
+  RAW_DATASET: ${{ vars.RAW_DATASET }}
+  ANALYTICS_DATASET: ${{ vars.ANALYTICS_DATASET }}
+```
 
-sales_2026_06_10.csv
+Authentication should use the environment-specific secret:
 
-Use this file for bad-data test:
+```yaml
+with:
+  credentials_json: ${{ secrets.GCP_SA_KEY }}
+```
 
-sales_2026_06_11.csv
+### Recommended production controls
 
-## Expected Behavior
+The `production` environment should have stricter controls than `development`.
 
-Good file:
+Recommended production settings:
 
-- Pipeline succeeds
-- dbt tests pass
-- Final sales summary is created
+* Require approval before production runs
+* Restrict production deployments to the `main` branch
+* Use production-specific secrets and credentials
+* Avoid sharing development credentials with production
 
-Bad file:
+### Expected result
 
-- Bad rows are loaded into rejected_sales_records
-- dbt tests may fail
-- Failure is expected because the file contains data quality issues
+With this setup:
 
-## Learning Points
-
-This project teaches:
-
-- File-based ingestion
-- Cloud Storage landing zones
-- BigQuery raw and analytics datasets
-- dbt sources, models, refs, and tests
-- Data quality validation
-- Rejected records handling
-- GitHub Actions automation
-
-## Version 2: GCS Landing Zone Pattern
-
-The pipeline now treats GCS as the landing zone.
-
-Files should arrive in:
-
-gs://daily-sales-learning-sales-demo-bucket-965488630989/incoming/
-
-The GitHub Actions workflow checks for a file in incoming, loads it into BigQuery, runs dbt, and then moves the file based on the result.
-
-Success:
-
-incoming/file.csv → processed/file.csv
-
-Failure:
-
-incoming/file.csv → rejected/file.csv
-
-### Simulate source file arrival
-
-Upload good file:
-
-make upload-good
-
-Upload bad file:
-
-make upload-bad
-
-### Run from GitHub Actions
-
-Go to:
-
-Actions → Daily Sales Pipeline → Run workflow
-
-Use:
-
-sales_2026_06_10.csv
-
-for a success test.
-
-Use:
-
-sales_2026_06_11.csv
-
-for a failure/rejected-records test.
-
-### Scheduled behavior
-
-When the workflow runs on schedule, it looks for the first CSV file in incoming/.
-
-If a file exists, it processes it.
-
-If no file exists, the workflow fails clearly.
+* Development runs use development datasets, folders, and credentials
+* Production runs use production datasets, folders, and credentials
+* Production deployments can require manual approval
+* The workflow stays reusable while configuration changes by environment
