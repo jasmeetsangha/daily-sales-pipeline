@@ -1,7 +1,7 @@
 include .env
 export
 
-.PHONY: upload-good upload-bad load dbt-build run-good run-bad full-good full-bad check-output check-rejected check-events
+.PHONY: check-history upload-good upload-bad load dbt-build run-good run-bad full-good full-bad check-output check-rejected check-events
 
 upload-good:
 	gcloud storage cp daily_sales_pipeline_demo/incoming/sales_2026_06_10.csv gs://$(BUCKET_NAME)/incoming/sales_2026_06_10.csv
@@ -48,3 +48,7 @@ check-audit:
 check-events:
 	bq query --use_legacy_sql=false \
 	"SELECT event_time, github_run_id, github_run_attempt, file_name, event_type, source_uri, destination_uri, message FROM \`$(PROJECT_ID).$(RAW_DATASET).pipeline_run_events\` ORDER BY event_time DESC LIMIT 20"
+
+check-history:
+	bq query --use_legacy_sql=false \
+	"SELECT run_id, source_file, MIN(loaded_at) AS loaded_at, COUNT(*) AS row_count FROM \`$(PROJECT_ID).$(RAW_DATASET).sales_daily_history\` GROUP BY run_id, source_file ORDER BY loaded_at DESC LIMIT 20"

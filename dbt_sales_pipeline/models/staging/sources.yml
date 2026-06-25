@@ -5,5 +5,5 @@ sources:
     database: daily-sales-learning
     schema: sales_raw
     tables:
-      - name: sales_daily
-        description: Raw daily sales file loaded from GCS into BigQuery.
+      - name: sales_daily_history
+        description: Append-only raw sales history loaded from GCS files.
