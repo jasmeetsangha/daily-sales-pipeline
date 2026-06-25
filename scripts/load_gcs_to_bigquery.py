@@ -13,7 +13,9 @@ FILE_NAME = os.environ["FILE_NAME"]
 LANDING_TABLE_ID = f"{PROJECT_ID}.{RAW_DATASET}.sales_daily"
 HISTORY_TABLE_ID = f"{PROJECT_ID}.{RAW_DATASET}.sales_daily_history"
 AUDIT_TABLE_ID = f"{PROJECT_ID}.{RAW_DATASET}.pipeline_run_audit"
-GCS_URI = f"gs://{BUCKET_NAME}/incoming/{FILE_NAME}"
+
+INCOMING_PREFIX = os.environ.get("INCOMING_PREFIX", "incoming").strip("/")
+GCS_URI = f"gs://{BUCKET_NAME}/{INCOMING_PREFIX}/{FILE_NAME}"
 
 
 def utc_now():

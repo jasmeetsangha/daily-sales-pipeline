@@ -2,8 +2,8 @@ version: 2
 
 sources:
   - name: sales_raw
-    database: daily-sales-learning
-    schema: sales_raw
+    database: "{{ env_var('PROJECT_ID') }}"
+    schema: "{{ env_var('RAW_DATASET') }}"
     tables:
       - name: sales_daily_history
         description: Append-only raw sales history loaded from GCS files.

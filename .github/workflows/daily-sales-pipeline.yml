@@ -3,10 +3,19 @@ name: Daily Sales Pipeline
 on:
   workflow_dispatch:
     inputs:
+      target_environment:
+        description: "Environment to run against"
+        required: true
+        default: "development"
+        type: choice
+        options:
+          - development
+          - production
+
       file_name:
-        description: "CSV file to process. Leave default for good test file."
+        description: "CSV file to process. Leave blank to auto-pick first CSV in incoming."
         required: false
-        default: "sales_2026_06_10.csv"
+        default: ""
 
   schedule:
     - cron: "15 13 * * *"
@@ -15,17 +24,34 @@ jobs:
   run-pipeline:
     runs-on: ubuntu-latest
 
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'development' }}
+
     env:
-      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-      REGION: US
-      RAW_DATASET: sales_raw
-      ANALYTICS_DATASET: sales_analytics
-      BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
-      FILE_NAME: ${{ github.event.inputs.file_name || '' }}
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.REGION }}
+      RAW_DATASET: ${{ vars.RAW_DATASET }}
+      ANALYTICS_DATASET: ${{ vars.ANALYTICS_DATASET }}
+      BUCKET_NAME: ${{ vars.GCP_BUCKET_NAME }}
+      INCOMING_PREFIX: ${{ vars.INCOMING_PREFIX }}
+      PROCESSED_PREFIX: ${{ vars.PROCESSED_PREFIX }}
+      REJECTED_PREFIX: ${{ vars.REJECTED_PREFIX }}
+      FILE_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.file_name || '' }}
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Show selected environment
+        run: |
+          echo "GitHub event: $GITHUB_EVENT_NAME"
+          echo "Project: $PROJECT_ID"
+          echo "Region: $REGION"
+          echo "Raw dataset: $RAW_DATASET"
+          echo "Analytics dataset: $ANALYTICS_DATASET"
+          echo "Bucket: $BUCKET_NAME"
+          echo "Incoming prefix: $INCOMING_PREFIX"
+          echo "Processed prefix: $PROCESSED_PREFIX"
+          echo "Rejected prefix: $REJECTED_PREFIX"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -51,12 +77,12 @@ jobs:
 
           if [ -z "$FILE_NAME" ]; then
             echo "No manual file_name input was provided."
-            echo "Looking for the first CSV file in gs://$BUCKET_NAME/incoming/"
+            echo "Looking for the first CSV file in gs://$BUCKET_NAME/$INCOMING_PREFIX/"
 
-            FILE_URI=$(gcloud storage ls "gs://$BUCKET_NAME/incoming/*.csv" 2>/dev/null | sort | head -n 1 || true)
+            FILE_URI=$(gcloud storage ls "gs://$BUCKET_NAME/$INCOMING_PREFIX/*.csv" 2>/dev/null | sort | head -n 1 || true)
 
             if [ -z "$FILE_URI" ]; then
-              echo "No CSV files found in gs://$BUCKET_NAME/incoming/"
+              echo "No CSV files found in gs://$BUCKET_NAME/$INCOMING_PREFIX/"
               echo "This is a no-op scheduled run."
 
               echo "no_file_found=true" >> "$GITHUB_OUTPUT"
@@ -99,11 +125,32 @@ jobs:
               '${FILE_NAME}',
               'PIPELINE_STARTED',
               CURRENT_TIMESTAMP(),
-              'gs://${BUCKET_NAME}/incoming/${FILE_NAME}',
+              'gs://${BUCKET_NAME}/${INCOMING_PREFIX}/${FILE_NAME}',
               NULL,
-              'Pipeline started for file'
+              'Pipeline started for selected environment'
             )
           "
+
+      - name: Record no file found audit row
+        if: ${{ steps.resolve_file.outputs.no_file_found == 'true' }}
+        run: |
+          RUN_ID="github_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+
+          bq query --use_legacy_sql=false "
+          INSERT INTO \`${PROJECT_ID}.${RAW_DATASET}.pipeline_run_audit\`
+            (run_id, file_name, started_at, completed_at, row_count, status, error_message)
+          VALUES
+            (
+              '${RUN_ID}',
+              'NO_FILE_FOUND',
+              CURRENT_TIMESTAMP(),
+              CURRENT_TIMESTAMP(),
+              0,
+              'NO_FILE_FOUND',
+              'No CSV files found in incoming folder'
+            )
+          "
+
       - name: Record no file found event
         if: ${{ steps.resolve_file.outputs.no_file_found == 'true' }}
         run: |
@@ -130,28 +177,8 @@ jobs:
               'NO_FILE_FOUND',
               'NO_FILE_FOUND',
               CURRENT_TIMESTAMP(),
-              'gs://${BUCKET_NAME}/incoming/',
+              'gs://${BUCKET_NAME}/${INCOMING_PREFIX}/',
               NULL,
-              'No CSV files found in incoming folder'
-            )
-          "
-
-      - name: Record no file found audit row
-        if: ${{ steps.resolve_file.outputs.no_file_found == 'true' }}
-        run: |
-          RUN_ID="github_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
-
-          bq query --use_legacy_sql=false "
-          INSERT INTO \`${PROJECT_ID}.${RAW_DATASET}.pipeline_run_audit\`
-            (run_id, file_name, started_at, completed_at, row_count, status, error_message)
-          VALUES
-            (
-              '${RUN_ID}',
-              'NO_FILE_FOUND',
-              CURRENT_TIMESTAMP(),
-              CURRENT_TIMESTAMP(),
-              0,
-              'NO_FILE_FOUND',
               'No CSV files found in incoming folder'
             )
           "
@@ -159,11 +186,11 @@ jobs:
       - name: Check source file exists in GCS
         if: ${{ steps.resolve_file.outputs.no_file_found != 'true' }}
         run: |
-          echo "Checking file: gs://$BUCKET_NAME/incoming/$FILE_NAME"
+          echo "Checking file: gs://$BUCKET_NAME/$INCOMING_PREFIX/$FILE_NAME"
 
-          if ! gcloud storage ls "gs://$BUCKET_NAME/incoming/$FILE_NAME"; then
+          if ! gcloud storage ls "gs://$BUCKET_NAME/$INCOMING_PREFIX/$FILE_NAME"; then
             echo "Source file not found."
-            echo "Expected: gs://$BUCKET_NAME/incoming/$FILE_NAME"
+            echo "Expected: gs://$BUCKET_NAME/$INCOMING_PREFIX/$FILE_NAME"
             exit 1
           fi
 
@@ -177,9 +204,9 @@ jobs:
           mkdir -p ~/.dbt
           cat > ~/.dbt/profiles.yml <<EOF
           dbt_sales_pipeline:
-            target: dev
+            target: deploy
             outputs:
-              dev:
+              deploy:
                 type: bigquery
                 method: oauth
                 project: $PROJECT_ID
@@ -199,11 +226,9 @@ jobs:
       - name: Move file to processed
         if: ${{ success() && steps.resolve_file.outputs.no_file_found != 'true' }}
         run: |
-          echo "Moving file to processed folder."
-
           gcloud storage mv \
-            "gs://$BUCKET_NAME/incoming/$FILE_NAME" \
-            "gs://$BUCKET_NAME/processed/$FILE_NAME"
+            "gs://$BUCKET_NAME/$INCOMING_PREFIX/$FILE_NAME" \
+            "gs://$BUCKET_NAME/$PROCESSED_PREFIX/$FILE_NAME"
 
       - name: Record pipeline success event
         if: ${{ success() && steps.resolve_file.outputs.no_file_found != 'true' }}
@@ -231,8 +256,8 @@ jobs:
               '${FILE_NAME}',
               'PIPELINE_SUCCESS',
               CURRENT_TIMESTAMP(),
-              'gs://${BUCKET_NAME}/incoming/${FILE_NAME}',
-              'gs://${BUCKET_NAME}/processed/${FILE_NAME}',
+              'gs://${BUCKET_NAME}/${INCOMING_PREFIX}/${FILE_NAME}',
+              'gs://${BUCKET_NAME}/${PROCESSED_PREFIX}/${FILE_NAME}',
               'Pipeline completed successfully and file moved to processed'
             )
           "
@@ -240,17 +265,10 @@ jobs:
       - name: Move file to rejected
         if: ${{ failure() && steps.resolve_file.outputs.no_file_found != 'true' }}
         run: |
-          echo "Pipeline failed. Attempting to move file to rejected folder."
-
-          if [ -z "$FILE_NAME" ]; then
-            echo "FILE_NAME is empty. Nothing to move."
-            exit 0
-          fi
-
-          if gcloud storage ls "gs://$BUCKET_NAME/incoming/$FILE_NAME"; then
+          if gcloud storage ls "gs://$BUCKET_NAME/$INCOMING_PREFIX/$FILE_NAME"; then
             gcloud storage mv \
-              "gs://$BUCKET_NAME/incoming/$FILE_NAME" \
-              "gs://$BUCKET_NAME/rejected/$FILE_NAME"
+              "gs://$BUCKET_NAME/$INCOMING_PREFIX/$FILE_NAME" \
+              "gs://$BUCKET_NAME/$REJECTED_PREFIX/$FILE_NAME"
           else
             echo "File is not in incoming folder. Nothing to move."
           fi
@@ -281,8 +299,8 @@ jobs:
               '${FILE_NAME}',
               'PIPELINE_FAILED',
               CURRENT_TIMESTAMP(),
-              'gs://${BUCKET_NAME}/incoming/${FILE_NAME}',
-              'gs://${BUCKET_NAME}/rejected/${FILE_NAME}',
+              'gs://${BUCKET_NAME}/${INCOMING_PREFIX}/${FILE_NAME}',
+              'gs://${BUCKET_NAME}/${REJECTED_PREFIX}/${FILE_NAME}',
               'Pipeline failed and file was moved to rejected if it still existed in incoming'
             )
           "

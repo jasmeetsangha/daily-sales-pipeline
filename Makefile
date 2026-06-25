@@ -1,7 +1,7 @@
 include .env
 export
 
-.PHONY: check-history upload-good upload-bad load dbt-build run-good run-bad full-good full-bad check-output check-rejected check-events
+.PHONY: upload-good-dev upload-bad upload-good-prod upload-bad-prod  check-events-dev check-events-prod  check-output-dev check-output-prod check-history upload-good upload-bad load dbt-build run-good run-bad full-good full-bad check-output check-rejected check-events
 
 upload-good:
 	gcloud storage cp daily_sales_pipeline_demo/incoming/sales_2026_06_10.csv gs://$(BUCKET_NAME)/incoming/sales_2026_06_10.csv
@@ -43,7 +43,7 @@ check-rejected:
 
 check-audit:
 	bq query --use_legacy_sql=false \
-	"SELECT run_id, file_name, started_at, completed_at, row_count, status, error_message FROM \`$(PROJECT_ID).$(RAW_DATASET).pipeline_run_audit\` ORDER BY started_at DESC LIMIT 10"
+	"SELECT run_id, file_name, started_at, completed_at, rmake upload-goodow_count, status, error_message FROM \`$(PROJECT_ID).$(RAW_DATASET).pipeline_run_audit\` ORDER BY started_at DESC LIMIT 10"
 
 check-events:
 	bq query --use_legacy_sql=false \
@@ -52,3 +52,31 @@ check-events:
 check-history:
 	bq query --use_legacy_sql=false \
 	"SELECT run_id, source_file, MIN(loaded_at) AS loaded_at, COUNT(*) AS row_count FROM \`$(PROJECT_ID).$(RAW_DATASET).sales_daily_history\` GROUP BY run_id, source_file ORDER BY loaded_at DESC LIMIT 20"
+
+upload-good-dev:
+	gcloud storage cp daily_sales_pipeline_demo/incoming/sales_2026_06_10.csv gs://$(BUCKET_NAME)/dev/incoming/sales_2026_06_10.csv
+
+upload-bad-dev:
+	gcloud storage cp daily_sales_pipeline_demo/incoming/sales_2026_06_11.csv gs://$(BUCKET_NAME)/dev/incoming/sales_2026_06_11.csv
+
+upload-good-prod:
+	gcloud storage cp daily_sales_pipeline_demo/incoming/sales_2026_06_10.csv gs://$(BUCKET_NAME)/prod/incoming/sales_2026_06_10.csv
+
+upload-bad-prod:
+	gcloud storage cp daily_sales_pipeline_demo/incoming/sales_2026_06_11.csv gs://$(BUCKET_NAME)/prod/incoming/sales_2026_06_11.csv
+
+check-events-dev:
+	bq query --use_legacy_sql=false \
+	"SELECT event_time, github_run_id, github_run_attempt, file_name, event_type, source_uri, destination_uri, message FROM \`$(PROJECT_ID).sales_raw_dev.pipeline_run_events\` ORDER BY event_time DESC LIMIT 20"
+
+check-events-prod:
+	bq query --use_legacy_sql=false \
+	"SELECT event_time, github_run_id, github_run_attempt, file_name, event_type, source_uri, destination_uri, message FROM \`$(PROJECT_ID).sales_raw_prod.pipeline_run_events\` ORDER BY event_time DESC LIMIT 20"
+
+check-output-dev:
+	bq query --use_legacy_sql=false \
+	"SELECT * FROM \`$(PROJECT_ID).sales_analytics_dev.fct_daily_sales\` ORDER BY order_date, store_id"
+
+check-output-prod:
+	bq query --use_legacy_sql=false \
+	"SELECT * FROM \`$(PROJECT_ID).sales_analytics_prod.fct_daily_sales\` ORDER BY order_date, store_id"
